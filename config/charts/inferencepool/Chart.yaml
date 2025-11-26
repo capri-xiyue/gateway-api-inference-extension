@@ -7,3 +7,10 @@ type: application
 version: 0.0.0
 
 appVersion: "0.0.0"
+
+dependencies:
+  - name: epp
+    # This must match the version inside epp/Chart.yaml exactly
+    version: 0.1.0
+    # Use file:// protocol with relative path to the sibling
+    repository: "file://../epp"

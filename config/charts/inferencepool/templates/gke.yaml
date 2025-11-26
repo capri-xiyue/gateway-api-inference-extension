@@ -6,7 +6,7 @@ metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gateway-api-inference-extension.labels" . | nindent 4 }}
+    {{- include "gateway-api-inference-extension.inferencepool.labels" . | nindent 4 }}
 spec:
   targetRef:
     group: "{{ (split "/" .Values.inferencePool.apiVersion)._0 }}"
@@ -29,7 +29,7 @@ metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gateway-api-inference-extension.labels" . | nindent 4 }}
+    {{- include "gateway-api-inference-extension.inferencepool.labels" . | nindent 4 }}
 spec:
   targetRef:
     group: "{{ (split "/" .Values.inferencePool.apiVersion)._0 }}"
@@ -40,7 +40,7 @@ spec:
     logging:
       enabled: true    # log all requests by default
 ---
-{{- if or .Values.inferenceExtension.monitoring.gke.enabled (and .Values.inferenceExtension.monitoring.prometheus.enabled .Values.inferenceExtension.monitoring.prometheus.auth.enabled) }}
+{{- if or .Values.epp.inferenceExtension.monitoring.gke.enabled (and .Values.epp.inferenceExtension.monitoring.prometheus.enabled .Values.epp.inferenceExtension.monitoring.prometheus.auth.enabled) }}
 {{- $metricsReadSA := printf "%s-metrics-reader-sa" .Release.Name -}}
 {{- $metricsReadSecretName := printf "%s-metrics-reader-secret" .Release.Name -}}
 {{- $metricsReadRoleName := printf "%s-%s-metrics-reader" .Release.Namespace .Release.Name -}}
@@ -67,7 +67,7 @@ metadata:
   name: {{ $metricsReadSecretName }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gateway-api-inference-extension.labels" . | nindent 4 }}
+    {{- include "gateway-api-inference-extension.inferencepool.labels" . | nindent 4 }}
   annotations:
     kubernetes.io/service-account.name: {{ $metricsReadSA }}
 type: kubernetes.io/service-account-token
@@ -78,12 +78,12 @@ metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "gateway-api-inference-extension.labels" . | nindent 4 }}
+    {{- include "gateway-api-inference-extension.inferencepool.labels" . | nindent 4 }}
 spec:
   endpoints:
   - port: metrics
     scheme: http
-    interval: {{ .Values.inferenceExtension.monitoring.interval }}
+    interval: {{ .Values.epp.inferenceExtension.monitoring.interval }}
     path: /metrics
     authorization:
       type: Bearer
@@ -93,7 +93,7 @@ spec:
           key: token
   selector:
     matchLabels:
-      {{- include "gateway-api-inference-extension.selectorLabels" . | nindent 8 }}
+      {{- include "gateway-api-inference-extension.inferencepool.labels" . | nindent 8 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

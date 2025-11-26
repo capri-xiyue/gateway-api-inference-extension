@@ -1,76 +1,3 @@
-inferenceExtension:
-  replicas: 1
-  image:
-    name: epp
-    hub: us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension
-    tag: main
-    pullPolicy: Always
-  extProcPort: 9002
-  env: []
-  pluginsConfigFile: "default-plugins.yaml"
-  # Define additional container ports
-  extraContainerPorts: []
-  # Define additional service ports
-  extraServicePorts: []
-#  extraServicePorts:
-#    - name: http
-#      port: 8081
-#      protocol: TCP
-#      targetPort: 8081
-
-  # This is the plugins configuration file.
-  # pluginsCustomConfig:
-  #   custom-plugins.yaml: |
-  #     apiVersion: inference.networking.x-k8s.io/v1alpha1
-  #     kind: EndpointPickerConfig
-  #     plugins:
-  #     - type: custom-scorer
-  #       parameters:
-  #         custom-threshold: 64
-  #     schedulingProfiles:
-  #     - name: default
-  #       plugins:
-  #       - pluginRef: custom-scorer
-
-  # Example environment variables:
-  # env:
-  #   ENABLE_EXPERIMENTAL_FEATURE: "true"
-
-  flags:
-    # Log verbosity
-    v: 1
-
-  affinity: {}
-
-  tolerations: []
-  
-  # Sidecar configuration for EPP
-  sidecar:
-    enabled: false
-
-  # Monitoring configuration for EPP
-  monitoring:
-    interval: "10s"
-    # Prometheus ServiceMonitor will be created when enabled for EPP metrics collection
-    prometheus:
-      enabled: false
-      auth:
-        enabled: true
-        # Service account token secret for authentication
-        secretName: inference-gateway-sa-metrics-reader-secret
-      # additional labels for the ServiceMonitor
-      extraLabels: {}
-
-    # DEPRECATED: The 'gke' configuration will be removed in the next release.
-    gke:
-      enabled: false
-  tracing:
-    enabled: false
-    otelExporterEndpoint: "http://localhost:4317"
-    sampling:
-      sampler: "parentbased_traceidratio"
-      samplerArg: "0.1"
-
 inferencePool:
   targetPorts:
     - number: 8000
@@ -116,3 +43,77 @@ istio:
       # connectionPool:
       #   http:
       #     maxRequestsPerConnection: 256000
+
+epp:
+  inferenceExtension:
+    replicas: 1
+    image:
+      name: epp
+      hub: us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension
+      tag: main
+      pullPolicy: Always
+    extProcPort: 9002
+    env: [ ]
+    pluginsConfigFile: "default-plugins.yaml"
+    # Define additional container ports
+    extraContainerPorts: [ ]
+    # Define additional service ports
+    extraServicePorts: [ ]
+    #  extraServicePorts:
+    #    - name: http
+    #      port: 8081
+    #      protocol: TCP
+    #      targetPort: 8081
+
+    # This is the plugins configuration file.
+    # pluginsCustomConfig:
+    #   custom-plugins.yaml: |
+    #     apiVersion: inference.networking.x-k8s.io/v1alpha1
+    #     kind: EndpointPickerConfig
+    #     plugins:
+    #     - type: custom-scorer
+    #       parameters:
+    #         custom-threshold: 64
+    #     schedulingProfiles:
+    #     - name: default
+    #       plugins:
+    #       - pluginRef: custom-scorer
+
+    # Example environment variables:
+    # env:
+    #   ENABLE_EXPERIMENTAL_FEATURE: "true"
+
+    flags:
+      # Log verbosity
+      v: 1
+
+    affinity: { }
+
+    tolerations: [ ]
+
+    # Sidecar configuration for EPP
+    sidecar:
+      enabled: false
+
+    # Monitoring configuration for EPP
+    monitoring:
+      interval: "10s"
+      # Prometheus ServiceMonitor will be created when enabled for EPP metrics collection
+      prometheus:
+        enabled: false
+        auth:
+          enabled: true
+          # Service account token secret for authentication
+          secretName: inference-gateway-sa-metrics-reader-secret
+        # additional labels for the ServiceMonitor
+        extraLabels: { }
+
+      # DEPRECATED: The 'gke' configuration will be removed in the next release.
+      gke:
+        enabled: false
+    tracing:
+      enabled: false
+      otelExporterEndpoint: "http://localhost:4317"
+      sampling:
+        sampler: "parentbased_traceidratio"
+        samplerArg: "0.1"
