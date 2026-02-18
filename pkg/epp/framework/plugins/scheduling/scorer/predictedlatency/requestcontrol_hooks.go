@@ -24,10 +24,10 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jellydator/ttlcache/v3"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"k8s.io/apimachinery/pkg/types"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	fwkdl "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/datalayer"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requestcontrol"
 	schedulingtypes "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
@@ -35,10 +35,19 @@ import (
 	requtil "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/util/request"
 )
 
+const (
+	// Experimental_DefaultPrefillProfile is the default profile name for prefill pods in disaggregated serving.
+	// This constant identifies prefill endpoints for load tracking and training data collection.
+	// This is hardcoded for now until we land on a canonical approach for plugins to identify
+	// prefill and decode endpoints (See https://github.com/kubernetes-sigs/gateway-api-inference-extension/issues/2080)
+	Experimental_DefaultPrefillProfile = "prefill"
+)
+
 var _ requestcontrol.PreRequest = &PredictedLatency{}
 var _ requestcontrol.ResponseReceived = &PredictedLatency{}
 var _ requestcontrol.ResponseStreaming = &PredictedLatency{}
 var _ requestcontrol.ResponseComplete = &PredictedLatency{}
+var _ requestcontrol.AdmissionPlugin = &PredictedLatency{}
 
 type predictedLatencyCtx struct {
 	schedulingRequest         schedulingtypes.LLMRequest
@@ -130,11 +139,10 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	}
 
 	id := request.Headers[requtil.RequestIdHeaderKey]
-	endpointRequestList, ok := t.runningRequestLists[endpointName]
-	if !ok {
-		endpointRequestList = newRequestPriorityQueue()
-		t.runningRequestLists[endpointName] = endpointRequestList
-	}
+
+	// Get or create queue for this endpoint using sync.Map
+	actual, _ := t.runningRequestLists.LoadOrStore(endpointName, newRequestPriorityQueue())
+	endpointRequestList := actual.(*requestPriorityQueue)
 
 	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
 	if err != nil {
@@ -155,7 +163,7 @@ func (t *PredictedLatency) PreRequest(ctx context.Context, request *schedulingty
 	refreshLastSeenMetrics(ctx, predictedLatencyCtx)
 	t.setPredictedLatencyContextForRequest(request, predictedLatencyCtx)
 
-	if err := processPreRequestForLatencyPrediction(ctx, t.latencypredictor, predictedLatencyCtx); err != nil {
+	if err := processPreRequestForLatencyPrediction(ctx, t.latencypredictor, t.config.EndpointRoleLabel, predictedLatencyCtx); err != nil {
 		logger.V(logutil.DEBUG).Error(err, "Process PreRequest in latencypredictor failed")
 	}
 }
@@ -188,9 +196,9 @@ func (t *PredictedLatency) ResponseStreaming(ctx context.Context, request *sched
 	}
 
 	if predictedLatencyCtx.ttft == 0 {
-		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
+		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	} else {
-		processTokenForLatencyPrediction(ctx, t.latencypredictor, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
+		processTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.EndpointRoleLabel, predictedLatencyCtx, targetMetadata, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	}
 
 }
@@ -214,7 +222,7 @@ func (t *PredictedLatency) ResponseComplete(ctx context.Context, request *schedu
 	}
 	now := time.Now()
 	if !t.config.StreamingMode {
-		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
+		processFirstTokenForLatencyPrediction(ctx, t.latencypredictor, t.config.StreamingMode, t.config.EndpointRoleLabel, predictedLatencyCtx, now, t.config.SamplingMean, t.config.MaxSampledTokens)
 	}
 
 	if predictedLatencyCtx.ttft > 0 {
@@ -250,4 +258,29 @@ func (t *PredictedLatency) checkPredictor(logger logr.Logger, metadata *fwkdl.En
 		return false
 	}
 	return true
+}
+
+func (t *PredictedLatency) AdmitRequest(ctx context.Context, request *schedulingtypes.LLMRequest, endpoints []schedulingtypes.Endpoint) error {
+	logger := log.FromContext(ctx)
+	if request == nil {
+		// This should not happen as the framework should not call AdmitRequest with a nil request, but we defensively check to avoid panics
+		logger.V(logutil.DEBUG).Info("PredictedLatency.AdmitRequest: request is nil, skipping")
+		return nil
+	}
+
+	predictedLatencyCtx, err := t.getPredictedLatencyContextForRequest(request)
+	if err != nil {
+		// If we can't find the predictedLatency context, we log the error but allow the request to proceed. This is a fail-open approach to avoid rejecting requests due to internal errors in our plugin.
+		id := request.Headers[requtil.RequestIdHeaderKey]
+		logger.V(logutil.DEBUG).Error(err, "PredictedLatency.AdmitRequest: Failed to get PredictedLatency context for request", "requestID", id)
+		return nil
+	}
+
+	// If there is no valid pod for the request, reject it
+	if !predictedLatencyCtx.hasValidEndpoint && request.Objectives.Priority < 0 {
+		logger.V(logutil.DEBUG).Info("PredictedLatency.AdmitRequest: Rejecting a sheddable request as no valid endpoint available due to slo violation", "requestID", request.Headers[requtil.RequestIdHeaderKey])
+		return errors.New("no valid endpoint available to serve the request")
+	}
+
+	return nil
 }

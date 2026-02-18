@@ -56,7 +56,7 @@ BBR_IMAGE_REPO ?= $(IMAGE_REGISTRY)/$(BBR_IMAGE_NAME)
 BBR_IMAGE_TAG ?= $(BBR_IMAGE_REPO):$(GIT_TAG)
 
 BASE_IMAGE ?= gcr.io/distroless/static:nonroot
-BUILDER_IMAGE ?= golang:1.24
+BUILDER_IMAGE ?= golang:1.25
 ifdef GO_VERSION
 BUILDER_IMAGE = golang:$(GO_VERSION)
 endif
@@ -174,12 +174,18 @@ api-lint: golangci-api-lint
 	$(GOLANGCI_API_LINT) run -c .golangci-kal.yml --timeout 15m0s ./...
 
 .PHONY: verify
-verify: vet fmt-verify generate ci-lint api-lint verify-all
+verify: vet fmt-verify generate ci-lint api-lint verify-all verify-fw-imports
 	git --no-pager diff --exit-code config api client-go
 
 .PHONY: verify-crds
 verify-crds: kubectl-validate
 	hack/verify-manifests.sh
+
+# Verify framework import rules.
+# Runs in permissive mode: allows current exceptions, fails on new violations.
+.PHONY: verify-fw-imports
+verify-fw-imports:
+	go run hack/verify-framework-imports.go
 
 #If you are running in local and your helm dependency is outdated, you can run `make verify-helm-charts MODE=local`
 .PHONY: verify-helm-charts
@@ -365,9 +371,9 @@ inferencepool-helm-chart-push: yq helm-install
 bbr-helm-chart-push: yq helm-install
 	CHART=body-based-routing EXTRA_TAG="$(EXTRA_TAG)" IMAGE_REGISTRY="$(IMAGE_REGISTRY)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
 
-.PHONY: epp-standalone-helm-chart-push
-epp-standalone-helm-chart-push: yq helm-install
-	CHART=epp-standalone EXTRA_TAG="$(EXTRA_TAG)" IMAGE_REGISTRY="$(IMAGE_REGISTRY)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
+.PHONY: standalone-helm-chart-push
+standalone-helm-chart-push: yq helm-install
+	CHART=standalone EXTRA_TAG="$(EXTRA_TAG)" IMAGE_REGISTRY="$(IMAGE_REGISTRY)" YQ="$(YQ)" HELM="$(HELM)" ./hack/push-chart.sh
 ##@ Release
 
 .PHONY: release-quickstart

@@ -22,15 +22,15 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
 
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
-	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/util/logging"
+	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/plugin"
 	framework "sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/plugins/scheduling/scorer/prefix"
@@ -40,8 +40,8 @@ import (
 type PredictedLatency struct {
 	typedName           plugin.TypedName
 	latencypredictor    latencypredictor.PredictorInterface
-	runningRequestLists map[types.NamespacedName]*requestPriorityQueue
-	sloContextStore     *ttlcache.Cache[string, *predictedLatencyCtx]
+	runningRequestLists sync.Map                                      // Key: types.NamespacedName, Value: *requestPriorityQueue
+	sloContextStore     *ttlcache.Cache[string, *predictedLatencyCtx] // TTL cache for request contexts
 	headroomStrategy    headroomStrategy
 	config              Config
 }
@@ -67,6 +67,7 @@ type Config struct {
 	ContextTTL                time.Duration `json:"contextTTL,omitempty"`
 	SelectionMode             string        `json:"selectionMode,omitempty"`
 	StreamingMode             bool          `json:"streamingMode,omitempty"`
+	EndpointRoleLabel         string        `json:"endpointRoleLabel,omitempty"`
 }
 
 var DefaultConfig = Config{
@@ -161,11 +162,11 @@ func NewPredictedLatency(config Config, predictor latencypredictor.PredictorInte
 	}
 
 	predictedLatency := &PredictedLatency{
-		typedName:           plugin.TypedName{Type: PredictedLatencyPluginType, Name: PredictedLatencyPluginType},
-		latencypredictor:    predictor,
-		runningRequestLists: make(map[types.NamespacedName]*requestPriorityQueue),
-		headroomStrategy:    strategy,
-		config:              config,
+		typedName:        plugin.TypedName{Type: PredictedLatencyPluginType, Name: PredictedLatencyPluginType},
+		latencypredictor: predictor,
+		// runningRequestLists is a sync.Map and needs no initialization
+		headroomStrategy: strategy,
+		config:           config,
 	}
 
 	predictedLatency.sloContextStore = ttlcache.New(
@@ -192,7 +193,10 @@ func startPredictor(handle plugin.Handle) (latencypredictor.PredictorInterface, 
 
 	go func() {
 		<-handle.Context().Done()
-		predictor.Stop()
+		// ✅ Create a timeout context for graceful shutdown
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		predictor.Stop(stopCtx)
 	}()
 	return predictor, nil
 }
@@ -299,44 +303,25 @@ func (s *PredictedLatency) Score(ctx context.Context, state *framework.CycleStat
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	sloCtx := s.getOrMakePredictedLatencyContextForRequest(request)
-
-	predictions, err := s.generatePredictions(ctx, request, sloCtx, endpoints)
-	if err != nil || len(predictions) == 0 {
-		logger.V(logutil.DEBUG).Error(err, "PredictedLatency: Error generating predictions, falling back to composite-only scoring")
-		s.setPredictedLatencyContextForRequest(request, sloCtx)
-		return s.scoreWithoutPredictions(ctx, sloCtx, endpoints, rng)
+	predictedLatencyCtx, err := s.getPredictedLatencyContextForRequest(request)
+	if err != nil {
+		logger.V(logutil.DEBUG).Error(err, "PredictedLatency: no SLO context found for request, returning composite-only scores")
+		return s.scoreWithoutPredictions(ctx, newPredictedLatencyContext(request), endpoints, rng)
 	}
-	s.updateRequestContextWithPredictions(sloCtx, predictions)
 
+	predictions := predictedLatencyCtx.predictionsForScheduling
+	if len(predictions) != len(endpoints) {
+		logger.V(logutil.DEBUG).Info("PredictedLatency: prediction count mismatch, falling back to composite-only scoring",
+			"predictions", len(predictions), "endpoints", len(endpoints))
+		return s.scoreWithoutPredictions(ctx, predictedLatencyCtx, endpoints, rng)
+	}
 	// Initialize scores map with all pods having score 0
 	scores := make(map[framework.Endpoint]float64, len(endpoints))
 	for _, endpoint := range endpoints {
 		scores[endpoint] = 0
 	}
 	allPreds := append([]endpointPredictionResult(nil), predictions...)
-	allPreds, sticky := s.epsilonGreedyAffinityGate(ctx, allPreds, rng, "overall", s.config.AffinityGateTauGlobal)
-
-	// Check if all pods are invalid and all have running requests
-	allEndpointsInvalid := (sloCtx.ttftSLO > 0 && (sloCtx.avgTPOTSLO > 0 || !s.config.StreamingMode))
-	allEndpointsHaveRunningRequests := true
-
-	for _, pred := range allPreds {
-		if pred.IsValid {
-			allEndpointsInvalid = false
-		}
-
-		runningRequestCount := s.getEndpointRunningRequestCount(pred.Endpoint)
-		if runningRequestCount == 0 {
-			allEndpointsHaveRunningRequests = false
-		}
-	}
-
-	// Set HasValidEndpoint to false if all endpoints are invalid and all have running requests
-	if allEndpointsInvalid && allEndpointsHaveRunningRequests && !sticky {
-		sloCtx.hasValidEndpoint = false
-		logger.V(logutil.DEBUG).Info("All endpoints are invalid and have running requests, setting HasValidEndpoint to false")
-	}
+	allPreds, _ = s.epsilonGreedyAffinityGate(ctx, allPreds, rng, "overall", s.config.AffinityGateTauGlobal)
 
 	// 2) Tiered selection: positive headroom pods get 99% probability, negative get 1%
 	posHeadroomEndpoints, negHeadroomEndpoints := s.classifyEndpointsByHeadroom(allPreds)
@@ -352,8 +337,6 @@ func (s *PredictedLatency) Score(ctx context.Context, state *framework.CycleStat
 		scores[selectedEndpoint] = 1
 		logger.V(logutil.DEBUG).Info("Selected endpoint for scheduling", "endpoint", selectedEndpoint.GetMetadata().String())
 	}
-
-	s.setPredictedLatencyContextForRequest(request, sloCtx)
 
 	return scores
 }
