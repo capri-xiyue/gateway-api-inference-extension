@@ -97,8 +97,7 @@ type HarnessConfig struct {
 	// mode is the master switch. It tells you explicitly what the config is for.
 	mode runMode
 
-	// standaloneCfg settings are always present (not a pointer),
-	// but they are only relevant if mode == ModeStandalone.
+	// standaloneCfg settings are used when mode == ModeStandalone.
 	standaloneCfg *standaloneConfig
 }
 
@@ -205,7 +204,7 @@ func NewTestHarness(t *testing.T, ctx context.Context, opts ...HarnessOption) *T
 	// Configure Datastore based on mode.
 	// We disable periodic resync (0) to ensure deterministic test behavior.
 	if config.mode == ModeStandalone && config.standaloneCfg.strategy == StrategyNoCRD {
-		// Disable CRD watching for standaloneCfg mode.
+		// Disable CRD watching for standalone mode without crd
 		runner.ControllerCfg = server.NewControllerConfig(false)
 
 		endpointPool, err := eppRunner.NewEndpointPoolFromOptions(

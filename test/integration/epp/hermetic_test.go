@@ -114,7 +114,9 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 		wantResponses []*extProcPb.ProcessingResponse
 		wantMetrics   map[string]string
 		waitForModel  string
-		requiresCRDs  bool
+		// requiresCRDs indicates that this test case relies on specific Gateway API CRD features (like
+		// InferenceModelRewrite) which are not available in Standalone mode without CRD.
+		requiresCRDs bool
 	}{
 		// --- Standard Routing Logic ---
 		{
@@ -402,7 +404,7 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 						h = h.WithBaseResources()
 					}
 
-					// In standaloneCfg executionMode, we cannot wait for an Objective CRD to sync as it doesn't exist.
+					// In standalone mode without crd, we cannot wait for an Objective CRD to sync as it doesn't exist.
 					// We only wait for Pod discovery.
 					modelToSync := tc.waitForModel
 					if modelToSync == "" {
