@@ -394,11 +394,14 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 						t.Skipf("Skipping test %q: requires CRDs, but running in standalone without crd executionMode", tc.name)
 					}
 
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+
 					var h *TestHarness
 					if executionMode.mode == ModeStandalone {
-						h = NewTestHarness(t, context.Background(), WithStandaloneMode(executionMode.standaloneCfg))
+						h = NewTestHarness(t,ctx, context.Background(), WithStandaloneMode(executionMode.standaloneCfg))
 					} else {
-						h = NewTestHarness(t, context.Background(), WithStandardMode())
+						h = NewTestHarness(t, ctx,  context.Background(), WithStandardMode())
 					}
 					if executionMode.mode == ModeStandard || executionMode.standaloneCfg.strategy == StrategyWithCRD {
 						h = h.WithBaseResources()
