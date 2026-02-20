@@ -102,9 +102,9 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 		mode          runMode
 		standaloneCfg *standaloneConfig
 	}{
-		{name: "Standard", mode: ModeStandard},
-		{name: "Standalone-NoCRD", mode: ModeStandalone, standaloneCfg: &standaloneConfig{StrategyNoCRD}},
-		{name: "Standalone-WithCRD", mode: ModeStandalone, standaloneCfg: &standaloneConfig{StrategyWithCRD}},
+		{name: "Standard", mode: modeStandard},
+		{name: "Standalone-NoCRD", mode: modeStandalone, standaloneCfg: &standaloneConfig{strategyNoCRD}},
+		{name: "Standalone-WithCRD", mode: modeStandalone, standaloneCfg: &standaloneConfig{strategyWithCRD}},
 	}
 
 	tests := []struct {
@@ -390,7 +390,7 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 		t.Run(executionMode.name, func(t *testing.T) {
 			for _, tc := range tests {
 				t.Run(tc.name, func(t *testing.T) {
-					if executionMode.mode == ModeStandalone && executionMode.standaloneCfg.strategy == StrategyNoCRD && tc.requiresCRDs {
+					if executionMode.mode == modeStandalone && executionMode.standaloneCfg.strategy == strategyNoCRD && tc.requiresCRDs {
 						t.Skipf("Skipping test %q: requires CRDs, but running in standalone without crd executionMode", tc.name)
 					}
 
@@ -398,12 +398,12 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 					defer cancel()
 
 					var h *TestHarness
-					if executionMode.mode == ModeStandalone {
+					if executionMode.mode == modeStandalone {
 						h = NewTestHarness(t, ctx, WithStandaloneMode(executionMode.standaloneCfg))
 					} else {
 						h = NewTestHarness(t, ctx, WithStandardMode())
 					}
-					if executionMode.mode == ModeStandard || executionMode.standaloneCfg.strategy == StrategyWithCRD {
+					if executionMode.mode == modeStandard || executionMode.standaloneCfg.strategy == strategyWithCRD {
 						h = h.WithBaseResources()
 					}
 

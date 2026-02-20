@@ -89,10 +89,10 @@ type standaloneConfig struct {
 }
 
 const (
-	ModeStandard    runMode            = "standard"
-	ModeStandalone  runMode            = "standalone"
-	StrategyNoCRD   standaloneStrategy = "no_crd"   // Pure standalone
-	StrategyWithCRD standaloneStrategy = "with_crd" // standaloneCfg but watching CRDs
+	modeStandard    runMode            = "standard"
+	modeStandalone  runMode            = "standalone"
+	strategyNoCRD   standaloneStrategy = "no_crd"   // Pure standalone
+	strategyWithCRD standaloneStrategy = "with_crd" // standaloneCfg but watching CRDs
 )
 
 // HarnessConfig holds configuration options for the TestHarness.
@@ -100,7 +100,7 @@ type HarnessConfig struct {
 	// mode is the master switch. It tells you explicitly what the config is for.
 	mode runMode
 
-	// standaloneCfg settings are used when mode == ModeStandalone.
+	// standaloneCfg settings are used when mode == modeStandalone.
 	standaloneCfg *standaloneConfig
 }
 
@@ -110,7 +110,7 @@ type HarnessOption func(*HarnessConfig)
 // WithStandaloneMode configures the harness to run in standalone mode
 func WithStandaloneMode(standaloneCfg *standaloneConfig) HarnessOption {
 	return func(c *HarnessConfig) {
-		c.mode = ModeStandalone
+		c.mode = modeStandalone
 		c.standaloneCfg = standaloneCfg
 	}
 }
@@ -118,7 +118,7 @@ func WithStandaloneMode(standaloneCfg *standaloneConfig) HarnessOption {
 // WithStandard configures the harness to run in standard mode
 func WithStandardMode() HarnessOption {
 	return func(c *HarnessConfig) {
-		c.mode = ModeStandard
+		c.mode = modeStandard
 	}
 }
 
@@ -160,7 +160,7 @@ func NewTestHarness(t *testing.T, ctx context.Context, opts ...HarnessOption) *T
 	require.NoError(t, k8sClient.Create(ctx, ns), "failed to create test namespace")
 
 	eppOptions := defaultEppServerOptions(t, testNamespaceName)
-	if config.mode == ModeStandalone && config.standaloneCfg.strategy == StrategyNoCRD {
+	if config.mode == modeStandalone && config.standaloneCfg.strategy == strategyNoCRD {
 		// Only standalone EPP without crd need to set the EndpointSelector.
 		eppOptions.EndpointSelector = "app=" + testPoolName
 	}
@@ -320,7 +320,7 @@ func (h *TestHarness) WaitForSync(expectedPods int, checkModelObjective string) 
 	require.Eventually(h.t, func() bool {
 		// If we are NOT in standalone mode without CRDs, we must wait for the Pool CRD to sync.
 		// In standaloneCfg mode, there is no CRD controller, so this check is skipped.
-		if (h.Mode != ModeStandalone || h.StandaloneConfig.strategy != StrategyNoCRD) && !h.Datastore.PoolHasSynced() {
+		if (h.Mode != modeStandalone || h.StandaloneConfig.strategy != strategyNoCRD) && !h.Datastore.PoolHasSynced() {
 			return false
 		}
 
@@ -330,7 +330,7 @@ func (h *TestHarness) WaitForSync(expectedPods int, checkModelObjective string) 
 		// In standalone mode without CRD, Objectives are not CRDs, so we skip checking the Objective store unless we add logic to mock
 		// that too.
 		// For now, we skip objective verification in standalone mode without CRD.
-		if (h.Mode != ModeStandalone || h.StandaloneConfig.strategy != StrategyNoCRD) && checkModelObjective != "" && h.Datastore.ObjectiveGet(checkModelObjective) == nil {
+		if (h.Mode != modeStandalone || h.StandaloneConfig.strategy != strategyNoCRD) && checkModelObjective != "" && h.Datastore.ObjectiveGet(checkModelObjective) == nil {
 			return false
 		}
 		return true
