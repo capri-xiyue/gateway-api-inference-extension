@@ -160,8 +160,8 @@ func NewTestHarness(t *testing.T, ctx context.Context, opts ...HarnessOption) *T
 	require.NoError(t, k8sClient.Create(ctx, ns), "failed to create test namespace")
 
 	eppOptions := defaultEppServerOptions(t, testNamespaceName)
-	if config.StandaloneMode {
-		// Only standalone EPP need to set the EndpointSelector.
+	if config.mode == ModeStandalone && config.standaloneCfg.strategy == StrategyNoCRD {
+		// Only standalone EPP without crd need to set the EndpointSelector.
 		eppOptions.EndpointSelector = "app=" + testPoolName
 	}
 
@@ -188,15 +188,15 @@ func NewTestHarness(t *testing.T, ctx context.Context, opts ...HarnessOption) *T
 	)
 
 	h := &TestHarness{
-		t:              t,
-		ctx:            mgrCtx,
-		Namespace:      eppOptions.PoolNamespace,
+		t:                t,
+		ctx:              mgrCtx,
+		Namespace:        eppOptions.PoolNamespace,
 		Mode:             config.mode,
 		StandaloneConfig: config.standaloneCfg,
-		Client:         client,
-		Datastore:      dataStore,
-		grpcConn:       conn,
-		fakePmc:        fakePmc,
+		Client:           client,
+		Datastore:        dataStore,
+		grpcConn:         conn,
+		fakePmc:          fakePmc,
 	}
 
 	t.Cleanup(func() {

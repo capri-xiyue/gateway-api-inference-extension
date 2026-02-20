@@ -399,9 +399,9 @@ func TestFullDuplexStreamed_KubeInferenceObjectiveRequest(t *testing.T) {
 
 					var h *TestHarness
 					if executionMode.mode == ModeStandalone {
-						h = NewTestHarness(t,ctx, context.Background(), WithStandaloneMode(executionMode.standaloneCfg))
+						h = NewTestHarness(t, ctx, WithStandaloneMode(executionMode.standaloneCfg))
 					} else {
-						h = NewTestHarness(t, ctx,  context.Background(), WithStandardMode())
+						h = NewTestHarness(t, ctx, WithStandardMode())
 					}
 					if executionMode.mode == ModeStandard || executionMode.standaloneCfg.strategy == StrategyWithCRD {
 						h = h.WithBaseResources()
