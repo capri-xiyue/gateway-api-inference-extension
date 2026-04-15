@@ -246,7 +246,7 @@ func TestPrefixPluginChatCompletionsGrowth(t *testing.T) {
 			ChatCompletions: &fwkrh.ChatCompletionsRequest{
 				Messages: []fwkrh.Message{
 					{Role: "system", Content: fwkrh.Content{Raw: "You are a helpful assistant"}},
-					{Role: "user", Content: fwkrh.Content{Raw: "Hello, how are you?"}},
+					{Role: "user", Content: fwkrh.Content{Structured: []fwkrh.ContentBlock{{Type: "image_url", ImageURL: fwkrh.ImageBlock{Url: "https://example.com/image.png"}}}}},
 				},
 			},
 		},

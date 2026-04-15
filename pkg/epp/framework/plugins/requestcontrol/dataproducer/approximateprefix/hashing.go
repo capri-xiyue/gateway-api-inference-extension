@@ -19,13 +19,16 @@ package approximateprefix
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/cespare/xxhash/v2"
 	"lukechampine.com/blake3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
+	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/requesthandling"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
 
@@ -115,20 +118,25 @@ func getUserInputBytes(request *scheduling.InferenceRequest) ([]byte, error) {
 		// This is important for ensuring that subsequent plugins in the chain
 		// see the original, unmodified request.
 		originalMessages := request.Body.ChatCompletions.Messages
-		for _, msg := range originalMessages {
-			if len(msg.Content.Structured) > 0 {
-				for _, block := range msg.Content.Structured {
+		clonedMessages, _ := DeepCloneMessages(originalMessages)
+		for i := range clonedMessages {
+			if len(clonedMessages[i].Content.Structured) > 0 {
+
+				for j := range clonedMessages[i].Content.Structured {
+					// Use a pointer to modify the actual item in the slice
+					block := &clonedMessages[i].Content.Structured[j]
+
 					if block.Type == "image_url" && block.ImageURL.Url != "" {
 						// Hash the image URL using BLAKE3
 						hash := blake3.Sum256([]byte(block.ImageURL.Url))
-						block.ImageURL.Url = string(hash[:])
 
+						// Encode to a readable, URL-safe hexadecimal string
+						block.ImageURL.Url = hex.EncodeToString(hash[:])
 					}
 				}
-
 			}
 		}
-		return json.Marshal(originalMessages)
+		return json.Marshal(clonedMessages)
 
 	case request.Body.Completions != nil:
 		return []byte(request.Body.Completions.Prompt.PlainText()), nil
@@ -140,4 +148,24 @@ func getUserInputBytes(request *scheduling.InferenceRequest) ([]byte, error) {
 	default:
 		return nil, errors.New("invalid request body: no recognized API format found")
 	}
+}
+
+func DeepCloneMessages(original []requesthandling.Message) ([]requesthandling.Message, error) {
+	if original == nil {
+		return nil, nil
+	}
+
+	// 1. Marshal the original slice to JSON bytes
+	bytes, err := json.Marshal(original)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal messages: %w", err)
+	}
+
+	// 2. Unmarshal back into a new slice
+	var cloned []requesthandling.Message
+	if err := json.Unmarshal(bytes, &cloned); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal messages: %w", err)
+	}
+
+	return cloned, nil
 }
