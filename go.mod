@@ -48,6 +48,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	go.opentelemetry.io/otel/trace v1.43.0
 	golang.org/x/time v0.15.0
+	lukechampine.com/blake3 v1.4.1
 	sigs.k8s.io/kustomize/api v0.21.1
 	sigs.k8s.io/kustomize/kyaml v0.21.1
 )
@@ -97,6 +98,7 @@ require (
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect

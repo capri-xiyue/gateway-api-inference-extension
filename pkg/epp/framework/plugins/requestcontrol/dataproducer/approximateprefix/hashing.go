@@ -23,6 +23,7 @@ import (
 	"errors"
 
 	"github.com/cespare/xxhash/v2"
+	"lukechampine.com/blake3"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
@@ -110,7 +111,24 @@ func getUserInputBytes(request *scheduling.InferenceRequest) ([]byte, error) {
 		return json.Marshal(combined)
 
 	case request.Body.ChatCompletions != nil:
-		return json.Marshal(request.Body.ChatCompletions.Messages)
+		// Deep copy messages to avoid modifying the original request object.
+		// This is important for ensuring that subsequent plugins in the chain
+		// see the original, unmodified request.
+		originalMessages := request.Body.ChatCompletions.Messages
+		for _, msg := range originalMessages {
+			if len(msg.Content.Structured) > 0 {
+				for _, block := range msg.Content.Structured {
+					if block.Type == "image_url" && block.ImageURL.Url != "" {
+						// Hash the image URL using BLAKE3
+						hash := blake3.Sum256([]byte(block.ImageURL.Url))
+						block.ImageURL.Url = string(hash[:])
+
+					}
+				}
+
+			}
+		}
+		return json.Marshal(originalMessages)
 
 	case request.Body.Completions != nil:
 		return []byte(request.Body.Completions.Prompt.PlainText()), nil
