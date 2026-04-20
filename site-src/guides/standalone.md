@@ -92,7 +92,7 @@ Choose one of the following options to deploy an Endpoint Picker Extension with 
             helm install vllm-qwen3-32b-standalone \
             --dependency-update \
             --set inferenceExtension.endpointsServer.endpointSelector="app=vllm-qwen3-32b" \
-            --set inferenceExtension.endpointsServer.createInferencePool=false
+            --set inferenceExtension.endpointsServer.createInferencePool=false \
             --set provider.name=$PROVIDER \
             --version $STANDALONE_CHART_VERSION \
              oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/standalone
@@ -128,7 +128,7 @@ Send an inference request via
 ```bash
 kubectl exec curl -- curl -i http://vllm-qwen3-32b-epp:8081/v1/completions \
 -H 'Content-Type: application/json' \
--d '{"model": "food-review-1","prompt": "Write as if you were a critic: San Francisco","max_tokens": 100,"temperature": 0}'
+-d '{"model": "Qwen/Qwen3-32B","prompt": "Write as if you were a critic: San Francisco","max_tokens": 100,"temperature": 0}'
 ```
 
 #### Cleanup
