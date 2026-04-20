@@ -414,12 +414,6 @@ func NewEndpointPoolFromOptions(
 	endpointTargetPorts []int,
 ) (*datalayer.EndpointPool, error) {
 
-	if namespace == "" {
-		return nil, errors.New("namespace must not be empty")
-	}
-	if name == "" {
-		return nil, errors.New("name must not be empty")
-	}
 	if endpointSelector == "" {
 		return nil, errors.New("endpoint selector must not be empty")
 	}
