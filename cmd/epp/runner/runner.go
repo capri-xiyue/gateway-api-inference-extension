@@ -417,7 +417,7 @@ func NewEndpointPoolFromOptions(
 	if namespace == "" {
 		return nil, errors.New("namespace must not be empty")
 	}
-	//name e will be from epp name in standalone mode without inference api support
+	//name will be from epp name in standalone mode without inference api support
 	if name == "" {
 		return nil, errors.New("name must not be empty")
 	}
