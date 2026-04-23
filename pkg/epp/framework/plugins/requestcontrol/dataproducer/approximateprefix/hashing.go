@@ -17,16 +17,29 @@ limitations under the License.
 package approximateprefix
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"strings"
 
 	"github.com/cespare/xxhash/v2"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	logutil "sigs.k8s.io/gateway-api-inference-extension/pkg/common/observability/logging"
 	"sigs.k8s.io/gateway-api-inference-extension/pkg/epp/framework/interface/scheduling"
 )
+
+type ContentBlock struct {
+	TokenIDs  []string `json:"TokenIDs"`
+	ExtraHash string   `json:"ExtraHash"`
+	Size int `json:"Size"`
+}
 
 // hashPrompt divides the prompt into blocks and calculates a prefix cache hash for each block.
 // The first block hash includes the model name and cache salt (if provided).
@@ -132,4 +145,90 @@ func getUserInputBytes(request *scheduling.InferenceRequest) ([]byte, error) {
 	default:
 		return nil, errors.New("invalid request body: no recognized API format found")
 	}
+}
+
+func GetContentBlocks(request *scheduling.InferenceRequest, blockSizeTokens int) []ContentBlock {
+	if request == nil || request.Body == nil || request.Body.ChatCompletions == nil {
+		return nil
+	}
+
+	messages := request.Body.ChatCompletions.Messages
+	var allTokens []string
+	var tokenImageHashes []string
+
+	for _, msg := range messages {
+		if msg.Content.Raw != "" {
+			text := msg.Content.Raw
+			for i := 0; i < len(text); i += 4 {
+				end := i + 4
+				if end > len(text) {
+					end = len(text)
+				}
+				allTokens = append(allTokens, text[i:end])
+				tokenImageHashes = append(tokenImageHashes, "")
+			}
+		} else if len(msg.Content.Structured) > 0 {
+			for _, block := range msg.Content.Structured {
+				switch block.Type {
+				case "text":
+					text := block.Text
+					for i := 0; i < len(text); i += averageCharactersPerToken {
+						end := i + averageCharactersPerToken
+						if end > len(text) {
+							end = len(text)
+						}
+						allTokens = append(allTokens, text[i:end])
+						tokenImageHashes = append(tokenImageHashes, "")
+					}
+				case "image_url":
+					url := block.ImageURL.Url
+					var placeholders int
+					if strings.HasPrefix(url, "data:image/") && strings.Contains(url, "base64,") {
+						idx := strings.Index(url, "base64,")
+						base64Data := url[idx+7:]
+						decoded, err := base64.StdEncoding.DecodeString(base64Data)
+						if err == nil {
+							config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
+							if err == nil {
+								placeholders = ((config.Width * config.Height) / (32 * 32)) + 2
+							}
+						}
+					}
+					h := xxhash.New()
+					_, _ = h.Write([]byte(url))
+					imgHash := fmt.Sprintf("%x", h.Sum64())
+					
+					for i := 0; i < placeholders; i++ {
+						allTokens = append(allTokens, "P")
+						tokenImageHashes = append(tokenImageHashes, imgHash)
+					}
+				}
+			}
+		}
+	}
+
+	var res []ContentBlock
+	for i := 0; i < len(allTokens); i += blockSizeTokens {
+		end := i + blockSizeTokens
+		if end > len(allTokens) {
+			end = len(allTokens)
+		}
+		
+		blockTokens := allTokens[i:end]
+		var extraHash string
+		for j := i; j < end; j++ {
+			if tokenImageHashes[j] != "" {
+				extraHash += tokenImageHashes[j]
+				break
+			}
+		}
+		
+		res = append(res, ContentBlock{
+			TokenIDs:  blockTokens,
+			ExtraHash: extraHash,
+			Size:      blockSizeTokens,
+		})
+	}
+
+	return res
 }
