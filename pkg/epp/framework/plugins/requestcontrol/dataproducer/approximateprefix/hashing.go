@@ -38,7 +38,7 @@ import (
 type ContentBlock struct {
 	TokenIDs  []string `json:"TokenIDs"`
 	ExtraHash string   `json:"ExtraHash"`
-	Size int `json:"Size"`
+	Size      int      `json:"Size"`
 }
 
 // hashPrompt divides the prompt into blocks and calculates a prefix cache hash for each block.
@@ -50,35 +50,66 @@ func hashPrompt(ctx context.Context, request *scheduling.InferenceRequest, block
 		loggerDebug.Info("Request or request data is nil, skipping hashing")
 		return nil
 	}
+	if request.Body.ChatCompletions == nil {
 
-	userInput, err := getUserInputBytes(request)
-	if err != nil {
-		loggerDebug.Error(err, "Failed to get user input bytes")
-		return nil
+		userInput, err := getUserInputBytes(request)
+		if err != nil {
+			loggerDebug.Error(err, "Failed to get user input bytes")
+			return nil
+		}
+
+		// convert block size from tokens to characters
+		cacheBlockSizeChars := blockSizeTokens * averageCharactersPerToken
+
+		if cacheBlockSizeChars <= 0 {
+			loggerDebug.Info("Skipping prefix hashing: block size in characters must be positive",
+				"blockSizeTokens", blockSizeTokens,
+				"cacheBlockSizeChars", cacheBlockSizeChars)
+			return nil
+		}
+
+		if len(userInput) < cacheBlockSizeChars {
+			loggerDebug.Info("Request body too small for prefix cache", "size", len(userInput), "block size in chars", cacheBlockSizeChars)
+			return nil
+		}
+
+		if len(userInput) > cacheBlockSizeChars*maxPrefixBlocks {
+			loggerDebug.Info("Truncating input", "size", len(userInput), "max prefix blocks", maxPrefixBlocks, "block size in chars", cacheBlockSizeChars)
+			userInput = userInput[:maxPrefixBlocks*cacheBlockSizeChars]
+		}
+
+		// Split the body into blocks of size cacheBlockSizeChars.
+		res := make([]blockHash, 0, len(userInput)/cacheBlockSizeChars)
+
+		h := xxhash.New()
+		// Different models should have different hashes even with the same body.
+		_, _ = h.Write([]byte(request.TargetModel))
+		if cacheSalt := request.Body.CacheSalt(); cacheSalt != "" {
+			_, _ = h.Write([]byte(cacheSalt))
+		}
+
+		prevBlockHash := blockHash(h.Sum64())
+		i := 0
+		for ; i+cacheBlockSizeChars <= len(userInput); i += cacheBlockSizeChars {
+			h.Reset()
+			_, _ = h.Write(userInput[i : i+cacheBlockSizeChars])
+			_, _ = h.Write(toBytes(prevBlockHash))
+			res = append(res, blockHash(h.Sum64()))
+
+			prevBlockHash = res[len(res)-1]
+		}
+
+		// 2. Process any remaining bytes as a partial block
+		if i < len(userInput) {
+			h.Reset()
+
+			_, _ = h.Write(userInput[i:])
+			_, _ = h.Write(toBytes(prevBlockHash))
+			res = append(res, blockHash(h.Sum64()))
+		}
+
+		return res
 	}
-
-	// convert block size from tokens to characters
-	cacheBlockSizeChars := blockSizeTokens * averageCharactersPerToken
-
-	if cacheBlockSizeChars <= 0 {
-		loggerDebug.Info("Skipping prefix hashing: block size in characters must be positive",
-			"blockSizeTokens", blockSizeTokens,
-			"cacheBlockSizeChars", cacheBlockSizeChars)
-		return nil
-	}
-
-	if len(userInput) < cacheBlockSizeChars {
-		loggerDebug.Info("Request body too small for prefix cache", "size", len(userInput), "block size in chars", cacheBlockSizeChars)
-		return nil
-	}
-
-	if len(userInput) > cacheBlockSizeChars*maxPrefixBlocks {
-		loggerDebug.Info("Truncating input", "size", len(userInput), "max prefix blocks", maxPrefixBlocks, "block size in chars", cacheBlockSizeChars)
-		userInput = userInput[:maxPrefixBlocks*cacheBlockSizeChars]
-	}
-
-	// Split the body into blocks of size cacheBlockSizeChars.
-	res := make([]blockHash, 0, len(userInput)/cacheBlockSizeChars)
 
 	h := xxhash.New()
 	// Different models should have different hashes even with the same body.
@@ -88,25 +119,33 @@ func hashPrompt(ctx context.Context, request *scheduling.InferenceRequest, block
 	}
 
 	prevBlockHash := blockHash(h.Sum64())
-	i := 0
-	for ; i+cacheBlockSizeChars <= len(userInput); i += cacheBlockSizeChars {
-		h.Reset()
-		_, _ = h.Write(userInput[i : i+cacheBlockSizeChars])
-		_, _ = h.Write(toBytes(prevBlockHash))
-		res = append(res, blockHash(h.Sum64()))
 
-		prevBlockHash = res[len(res)-1]
-	}
+	contentBlocks := GetContentBlocks(request, blockSizeTokens)
+	res := make([]blockHash, 0, len(contentBlocks))
 
-	// 2. Process any remaining bytes as a partial block
-	if i < len(userInput) {
+	for _, contentBlock := range contentBlocks {
 		h.Reset()
 
-		_, _ = h.Write(userInput[i:])
-		_, _ = h.Write(toBytes(prevBlockHash))
-		res = append(res, blockHash(h.Sum64()))
-	}
+		// 1. Serialize the entire ContentBlock into bytes
+		blockBytes, err := json.Marshal(contentBlock)
+		if err != nil {
+			// Handle this error according to your app's needs
+			panic(err)
+		}
 
+		// 2. Hash the entire serialized block
+		_, _ = h.Write(blockBytes)
+
+		// 3. Chain the previous block's hash to maintain the sequence
+		_, _ = h.Write(toBytes(prevBlockHash))
+
+		// 4. Calculate the current hash and append to results
+		currentHash := blockHash(h.Sum64())
+		res = append(res, currentHash)
+
+		// 5. Update prevBlockHash for the next iteration
+		prevBlockHash = currentHash
+	}
 	return res
 }
 
@@ -197,7 +236,7 @@ func GetContentBlocks(request *scheduling.InferenceRequest, blockSizeTokens int)
 					h := xxhash.New()
 					_, _ = h.Write([]byte(url))
 					imgHash := fmt.Sprintf("%x", h.Sum64())
-					
+
 					for i := 0; i < placeholders; i++ {
 						allTokens = append(allTokens, "P")
 						tokenImageHashes = append(tokenImageHashes, imgHash)
@@ -213,7 +252,7 @@ func GetContentBlocks(request *scheduling.InferenceRequest, blockSizeTokens int)
 		if end > len(allTokens) {
 			end = len(allTokens)
 		}
-		
+
 		blockTokens := allTokens[i:end]
 		var extraHash string
 		for j := i; j < end; j++ {
@@ -222,7 +261,7 @@ func GetContentBlocks(request *scheduling.InferenceRequest, blockSizeTokens int)
 				break
 			}
 		}
-		
+
 		res = append(res, ContentBlock{
 			TokenIDs:  blockTokens,
 			ExtraHash: extraHash,
