@@ -229,7 +229,7 @@ func GetContentBlocks(request *scheduling.InferenceRequest, blockSizeTokens int)
 						if err == nil {
 							config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
 							if err == nil {
-								placeholders = ((config.Width * config.Height) / (32 * 32)) + 2
+								placeholders = ((config.Width * config.Height) / (28 * 28)) + 2
 							}
 						}
 					}
